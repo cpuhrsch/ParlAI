@@ -7,12 +7,15 @@
 import numpy as np
 import torch as th
 import torch.nn as nn
+import math
 
 from parlai.core.utils import neginf
 from parlai.agents.transformer.modules import TransformerGeneratorModel
 
+th = th.nested.monkey_patch(th)
 
-def universal_sentence_embedding(sentences, mask, sqrt=True):
+
+def _universal_sentence_embedding(sentences, mask, sqrt=True):
     """
     Perform Universal Sentence Encoder averaging (https://arxiv.org/abs/1803.11175).
 
@@ -35,12 +38,36 @@ def universal_sentence_embedding(sentences, mask, sqrt=True):
     sentence_sums /= divisor
     return sentence_sums
 
+def _universal_nested_sentence_embedding(nested_tensor, sqrt=True):
+    """
+    Perform Universal Sentence Encoder averaging (https://arxiv.org/abs/1803.11175).
+
+    This is really just sum / sqrt(len).
+
+    :param Tensor sentences: an N x T x D of Transformer outputs. Note this is
+        the exact output of TransformerEncoder, but has the time axis first
+    :param ByteTensor: an N x T binary matrix of paddings
+
+    :return: an N x D matrix of sentence embeddings
+    :rtype Tensor:
+    """
+    # need to mask out the padded chars
+    # sentence_sums = th.bmm(sentences.permute(0, 2, 1), mask.float().unsqueeze(-1)).squeeze(-1)
+    sentence_sums = nested_tensor.sum(1)
+    divisor = list(map(lambda x: x[0], nested_tensor.nested_size()))
+    # divisor = mask.sum(dim=1).view(-1, 1).float()
+    if sqrt:
+        divisor = list(map(lambda x: math.sqrt(x), divisor))
+        # divisor = divisor.sqrt()
+    divisor = th.nested_tensor(list(map(lambda x: th.tensor(x), divisor)))
+    return sentence_sums.div(divisor)
+
 
 class EndToEndModel(TransformerGeneratorModel):
     def __init__(self, opt, dictionary):
         super().__init__(opt, dictionary)
-        self.encoder = ContextKnowledgeEncoder(self.encoder)
-        self.decoder = ContextKnowledgeDecoder(self.decoder)
+        self.encoder = _ContextKnowledgeEncoder(self.encoder)
+        self.decoder = _ContextKnowledgeDecoder(self.decoder)
 
     def reorder_encoder_states(self, encoder_out, indices):
         enc, mask, ckattn = encoder_out
@@ -52,7 +79,7 @@ class EndToEndModel(TransformerGeneratorModel):
         return enc, mask, ckattn
 
 
-class ContextKnowledgeEncoder(nn.Module):
+class _ContextKnowledgeEncoder(nn.Module):
     def __init__(self, transformer):
         super().__init__()
         # The transformer takes care of most of the work, but other modules
@@ -63,16 +90,22 @@ class ContextKnowledgeEncoder(nn.Module):
 
     def forward(self, src_tokens, know_tokens, ck_mask, cs_ids, use_cs_ids):
         # encode the context, pretty basic
-        context_encoded, context_mask = self.transformer(src_tokens)
+        _context_encoded, _context_mask = self.transformer(src_tokens)
 
         # make all the knowledge into a 2D matrix to encode
         N, K, Tk = know_tokens.size()
         know_flat = know_tokens.reshape(-1, Tk)
-        know_encoded, know_mask = self.transformer(know_flat)
+        _know_encoded, _know_mask = self.transformer(know_flat)
 
         # compute our sentence embeddings for context and knowledge
-        context_use = universal_sentence_embedding(context_encoded, context_mask)
-        know_use = universal_sentence_embedding(know_encoded, know_mask)
+
+        _nested_context_encoded = th.nested_tensor_from_mask(_context_encoded, _context_mask)
+        context_use = _universal_nested_sentence_embedding(_nested_context_encoded)
+        context_use = th.stack(context_use.unbind())
+
+        _nested_know_encoded = th.nested_tensor_from_mask(_know_encoded, _know_mask)
+        know_use = _universal_nested_sentence_embedding(_nested_know_encoded)
+        know_use = th.stack(know_use.unbind())
 
         # remash it back into the shape we need
         know_use = know_use.reshape(N, know_tokens.size(1), self.embed_dim)
@@ -106,7 +139,7 @@ class ContextKnowledgeEncoder(nn.Module):
         return full_enc, full_mask, ck_attn
 
 
-class ContextKnowledgeDecoder(nn.Module):
+class _ContextKnowledgeDecoder(nn.Module):
     def __init__(self, transformer):
         super().__init__()
         self.transformer = transformer
