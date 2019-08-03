@@ -15,29 +15,6 @@ from parlai.agents.transformer.modules import TransformerGeneratorModel
 th = th.nested.monkey_patch(th)
 
 
-def _universal_sentence_embedding(sentences, mask, sqrt=True):
-    """
-    Perform Universal Sentence Encoder averaging (https://arxiv.org/abs/1803.11175).
-
-    This is really just sum / sqrt(len).
-
-    :param Tensor sentences: an N x T x D of Transformer outputs. Note this is
-        the exact output of TransformerEncoder, but has the time axis first
-    :param ByteTensor: an N x T binary matrix of paddings
-
-    :return: an N x D matrix of sentence embeddings
-    :rtype Tensor:
-    """
-    # need to mask out the padded chars
-    sentence_sums = th.bmm(
-        sentences.permute(0, 2, 1), mask.float().unsqueeze(-1)
-    ).squeeze(-1)
-    divisor = mask.sum(dim=1).view(-1, 1).float()
-    if sqrt:
-        divisor = divisor.sqrt()
-    sentence_sums /= divisor
-    return sentence_sums
-
 def _universal_nested_sentence_embedding(nested_tensor, sqrt=True):
     """
     Perform Universal Sentence Encoder averaging (https://arxiv.org/abs/1803.11175).
@@ -52,13 +29,10 @@ def _universal_nested_sentence_embedding(nested_tensor, sqrt=True):
     :rtype Tensor:
     """
     # need to mask out the padded chars
-    # sentence_sums = th.bmm(sentences.permute(0, 2, 1), mask.float().unsqueeze(-1)).squeeze(-1)
     sentence_sums = nested_tensor.sum(1)
     divisor = list(map(lambda x: x[0], nested_tensor.nested_size()))
-    # divisor = mask.sum(dim=1).view(-1, 1).float()
     if sqrt:
         divisor = list(map(lambda x: math.sqrt(x), divisor))
-        # divisor = divisor.sqrt()
     divisor = th.nested_tensor(list(map(lambda x: th.tensor(x), divisor)))
     return sentence_sums.div(divisor)
 
@@ -101,11 +75,12 @@ class _ContextKnowledgeEncoder(nn.Module):
 
         _nested_context_encoded = th.nested_tensor_from_mask(_context_encoded, _context_mask)
         context_use = _universal_nested_sentence_embedding(_nested_context_encoded)
-        context_use = th.stack(context_use.unbind())
+        # context_use = th.stack(context_use.unbind())
 
         _nested_know_encoded = th.nested_tensor_from_mask(_know_encoded, _know_mask)
         know_use = _universal_nested_sentence_embedding(_nested_know_encoded)
-        know_use = th.stack(know_use.unbind())
+        import pdb; pdb.set_trace()
+        # know_use = th.stack(know_use.unbind())
 
         # remash it back into the shape we need
         know_use = know_use.reshape(N, know_tokens.size(1), self.embed_dim)
