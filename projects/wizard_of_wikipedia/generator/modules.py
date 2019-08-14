@@ -75,40 +75,57 @@ class _ContextKnowledgeEncoder(nn.Module):
         _know_encoded, _know_mask = self.transformer(know_flat)
         _know_encoded = _know_encoded.reshape(N, K, Tk, -1)
         _know_mask = _know_mask.reshape(N, K, Tk)
+        _know_lengths = ck_mask.sum(1)
         _nested_know_encoded = th.nested_tensor([th.tensor_mask_to_nested_tensor(
-            _know_encoded[i], _know_mask[i]) for i in range(len(_know_mask))])
+            _know_encoded[i][:_know_lengths[i]], _know_mask[i][:_know_lengths[i]]) for i in range(len(_know_mask))])
 
         # compute our sentence embeddings for context and knowledge
 
+        def divisor(t):
+            if isinstance(t[0], tuple):
+                return tuple(map(divisor, t))
+            else:
+                return th.tensor(float(self.embed_dim) * float(t[0])).sqrt()
+
         context_use = _nested_context_encoded.sum(1)
         know_use = _nested_know_encoded.sum(2)
-        import pdb
-        pdb.set_trace()
 
-        context_use = _universal_nested_sentence_embedding(
-            _nested_context_encoded)
-        # context_use = th.stack(context_use.unbind())
+        context_use_divisor = th.nested_tensor(
+            divisor(_nested_context_encoded.nested_size()))
+        know_use_divisor = th.nested_tensor(
+            divisor(_nested_know_encoded.nested_size()))
 
-        know_use = _universal_nested_sentence_embedding(_nested_know_encoded)
-        # know_use = th.stack(know_use.unbind())
+        context_use = context_use.div(context_use_divisor)
+        know_use = know_use.div(know_use_divisor)
 
-        sqrt_embed_dim = math.sqrt(float(self.embed_dim))
-        context_use = context_use.div(th.nested_tensor(
-            [th.tensor(sqrt_embed_dim) for i in range(len(context_use))]))
-        know_use = know_use.div(th.nested_tensor(
-            [th.tensor(sqrt_embed_dim) for i in range(len(know_use))]))
+        # context_use = _universal_nested_sentence_embedding(
+        #     _nested_context_encoded)
+        # # context_use = th.stack(context_use.unbind())
+
+        # know_use = _universal_nested_sentence_embedding(_nested_know_encoded)
+        # # know_use = th.stack(know_use.unbind())
+
+        # sqrt_embed_dim = math.sqrt(float(self.embed_dim))
+        # context_use = context_use.div(th.nested_tensor(
+        #     [th.tensor(sqrt_embed_dim) for i in range(len(context_use))]))
+        # know_use = know_use.div(th.nested_tensor(
+        #     [th.tensor(sqrt_embed_dim) for i in range(len(know_use))]))
 
         # # remash it back into the shape we need
         # know_use = know_use.reshape(N, know_tokens.size(1), self.embed_dim)
 
-        ck_attn = th.bmm(know_use, context_use.unsqueeze(-1)).squeeze(-1)
+        know_use = th.nested_tensor(
+            list(map(lambda x: x.to_tensor(), know_use.unbind())))
+        ck_attn = th.mv(know_use, context_use)
+
+        # ck_attn = th.bmm(know_use, context_use.unsqueeze(-1)).squeeze(-1)
         # fill with near -inf
-        ck_attn.masked_fill_(~ck_mask, neginf(context_encoded.dtype))
+        # ck_attn.masked_fill_(~ck_mask, neginf(context_encoded.dtype))
 
         if not use_cs_ids:
             # if we're not given the true chosen_sentence (test time), pick our
             # best guess
-            _, cs_ids = ck_attn.max(1)
+            cs_ids = ck_attn.argmax(1).to_tensor()
 
         # pick the true chosen sentence. remember that TransformerEncoder outputs
         #   (batch, time, embed)
@@ -116,6 +133,8 @@ class _ContextKnowledgeEncoder(nn.Module):
         #   (N * K, T, D)
         # We need to compute the offsets of the chosen_sentences
         cs_offsets = th.arange(N, device=cs_ids.device) * K + cs_ids
+        import pdb
+        pdb.set_trace()
         cs_encoded = know_encoded[cs_offsets]
         # but padding is (N * K, T)
         cs_mask = know_mask[cs_offsets]
