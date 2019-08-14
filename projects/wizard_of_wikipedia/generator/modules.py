@@ -30,6 +30,7 @@ def _universal_nested_sentence_embedding(nested_tensor, sqrt=True):
     """
     # need to mask out the padded chars
     sentence_sums = nested_tensor.sum(1)
+    # TODO: How to turn this into an operation on top of nested_size
     divisor = list(map(lambda x: x[0], nested_tensor.nested_size()))
     if sqrt:
         divisor = list(map(lambda x: math.sqrt(x), divisor))
@@ -65,27 +66,40 @@ class _ContextKnowledgeEncoder(nn.Module):
     def forward(self, src_tokens, know_tokens, ck_mask, cs_ids, use_cs_ids):
         # encode the context, pretty basic
         _context_encoded, _context_mask = self.transformer(src_tokens)
+        _nested_context_encoded = th.tensor_mask_to_nested_tensor(
+            _context_encoded, _context_mask)
 
         # make all the knowledge into a 2D matrix to encode
         N, K, Tk = know_tokens.size()
         know_flat = know_tokens.reshape(-1, Tk)
         _know_encoded, _know_mask = self.transformer(know_flat)
+        _know_encoded = _know_encoded.reshape(N, K, Tk, -1)
+        _know_mask = _know_mask.reshape(N, K, Tk)
+        _nested_know_encoded = th.nested_tensor([th.tensor_mask_to_nested_tensor(
+            _know_encoded[i], _know_mask[i]) for i in range(len(_know_mask))])
 
         # compute our sentence embeddings for context and knowledge
 
-        _nested_context_encoded = th.nested_tensor_from_mask(_context_encoded, _context_mask)
-        context_use = _universal_nested_sentence_embedding(_nested_context_encoded)
+        context_use = _nested_context_encoded.sum(1)
+        know_use = _nested_know_encoded.sum(2)
+        import pdb
+        pdb.set_trace()
+
+        context_use = _universal_nested_sentence_embedding(
+            _nested_context_encoded)
         # context_use = th.stack(context_use.unbind())
 
-        _nested_know_encoded = th.nested_tensor_from_mask(_know_encoded, _know_mask)
         know_use = _universal_nested_sentence_embedding(_nested_know_encoded)
-        import pdb; pdb.set_trace()
         # know_use = th.stack(know_use.unbind())
 
-        # remash it back into the shape we need
-        know_use = know_use.reshape(N, know_tokens.size(1), self.embed_dim)
-        context_use /= np.sqrt(self.embed_dim)
-        know_use /= np.sqrt(self.embed_dim)
+        sqrt_embed_dim = math.sqrt(float(self.embed_dim))
+        context_use = context_use.div(th.nested_tensor(
+            [th.tensor(sqrt_embed_dim) for i in range(len(context_use))]))
+        know_use = know_use.div(th.nested_tensor(
+            [th.tensor(sqrt_embed_dim) for i in range(len(know_use))]))
+
+        # # remash it back into the shape we need
+        # know_use = know_use.reshape(N, know_tokens.size(1), self.embed_dim)
 
         ck_attn = th.bmm(know_use, context_use.unsqueeze(-1)).squeeze(-1)
         # fill with near -inf
