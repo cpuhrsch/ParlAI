@@ -116,7 +116,7 @@ class _ContextKnowledgeEncoder(nn.Module):
 
         know_use = th.nested_tensor(
             list(map(lambda x: x.to_tensor(), know_use.unbind())))
-        ck_attn = th.mv(know_use, context_use)
+        _nested_ck_attn = th.mv(know_use, context_use)
 
         # ck_attn = th.bmm(know_use, context_use.unsqueeze(-1)).squeeze(-1)
         # fill with near -inf
@@ -125,23 +125,34 @@ class _ContextKnowledgeEncoder(nn.Module):
         if not use_cs_ids:
             # if we're not given the true chosen_sentence (test time), pick our
             # best guess
-            cs_ids = ck_attn.argmax(1).to_tensor()
+            cs_ids = _nested_ck_attn.argmax(1).to_tensor()
 
         # pick the true chosen sentence. remember that TransformerEncoder outputs
         #   (batch, time, embed)
         # but because know_encoded is a flattened, it's really
         #   (N * K, T, D)
         # We need to compute the offsets of the chosen_sentences
-        cs_offsets = th.arange(N, device=cs_ids.device) * K + cs_ids
-        import pdb
-        pdb.set_trace()
-        cs_encoded = know_encoded[cs_offsets]
-        # but padding is (N * K, T)
-        cs_mask = know_mask[cs_offsets]
+        # cs_offsets = th.arange(N, device=cs_ids.device) * K + cs_ids
+        # cs_encoded = know_encoded[cs_offsets]
+        # # but padding is (N * K, T)
+        # cs_mask = know_mask[cs_offsets]
+
+        _nested_cs_encoded = th.nested_tensor([_nested_know_encoded.unbind()[i].unbind()[
+            cs_ids[cs_ids[i]]] for i in range(len(cs_ids))])
+
+        cs_encoded, cs_mask = _nested_cs_encoded.to_tensor_mask()
+        context_encoded, context_mask = _nested_context_encoded.to_tensor_mask()
+        ck_attn, ck_attn_mask = _nested_ck_attn.to_tensor_mask()
+
+        # _nested_full_enc = th.cat(
+        #     [_nested_cs_encoded, _nested_context_encoded], dim=1)
 
         # finally, concatenate it all
         full_enc = th.cat([cs_encoded, context_encoded], dim=1)
         full_mask = th.cat([cs_mask, context_mask], dim=1)
+
+        # import pdb
+        # pdb.set_trace()
 
         # also return the knowledge selection mask for the loss
         return full_enc, full_mask, ck_attn
