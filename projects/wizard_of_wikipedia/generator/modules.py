@@ -86,7 +86,7 @@ class ContextKnowledgeEncoder(nn.Module):
             cs_ids = nested_ck_attn.argmax(1).to_tensor()
 
         nested_cs_encoded = th.nested_tensor([nested_know_encoded.unbind()[i].unbind()[
-            cs_ids[cs_ids[i]]] for i in range(len(cs_ids))])
+            cs_ids[i]] for i in range(len(cs_ids))])
 
         # Convert it back to tensors + masks for compatability
         cs_encoded, cs_mask = nested_cs_encoded.to_tensor_mask()
