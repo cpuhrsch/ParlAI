@@ -51,10 +51,16 @@ class ContextKnowledgeEncoder(nn.Module):
         know_encoded, know_mask = self.transformer(know_flat)
         know_encoded = know_encoded.reshape(N, K, Tk, -1)
         know_mask = know_mask.reshape(N, K, Tk)
+
         know_lengths = ck_mask.sum(1)
         # Convert into a NestedTensor TODO: move this into tensor_mask_to_nested_tensor
         nested_know_encoded = th.nested_tensor([th.tensor_mask_to_nested_tensor(
             know_encoded[i][:know_lengths[i]], know_mask[i][:know_lengths[i]]) for i in range(len(know_mask))])
+
+        print(know_mask)
+        print(know_encoded)
+        print(nested_know_encoded.size())
+        print(nested_know_encoded.size(1))
 
         # Perform Universal Sentence Encoder averaging (https://arxiv.org/abs/1803.11175).
         # and normalization by embed_dim
@@ -72,6 +78,15 @@ class ContextKnowledgeEncoder(nn.Module):
             divisor(nested_context_encoded.nested_size()))
         know_use_divisor = th.nested_tensor(
             divisor(nested_know_encoded.nested_size()))
+
+        divisor2 = th.nested_tensor(list(map(th.tensor, nested_know_encoded.size(1)))).to(
+            th.float).sqrt()
+
+        context_use_divisor = th.nested_tensor(list(map(th.tensor, nested_context_encoded.size(1)))).to(
+            th.float).mul(th.nested_tensor([th.tensor(256)] * 64)).sqrt()
+
+        import pdb
+        pdb.set_trace()
 
         context_use = context_use.div(context_use_divisor)
         know_use = know_use.div(know_use_divisor)
