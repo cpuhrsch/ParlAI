@@ -60,7 +60,7 @@ class ContextKnowledgeEncoder(nn.Module):
         print(know_mask)
         print(know_encoded)
         print(nested_know_encoded.size())
-        print(nested_know_encoded.size(1))
+        print(nested_know_encoded.nested_size(1))
 
         # Perform Universal Sentence Encoder averaging (https://arxiv.org/abs/1803.11175).
         # and normalization by embed_dim
@@ -74,19 +74,15 @@ class ContextKnowledgeEncoder(nn.Module):
         context_use = nested_context_encoded.sum(1)
         know_use = nested_know_encoded.sum(2)
 
+        # context_use_divisor = th.nested_tensor(
+        #     divisor(nested_context_encoded.nested_size()))
+        # know_use_divisor = th.nested_tensor(
+        #     divisor(nested_know_encoded.nested_size()))
+
         context_use_divisor = th.nested_tensor(
-            divisor(nested_context_encoded.nested_size()))
+            nested_context_encoded.nested_size(1)).to(th.float).sqrt()
         know_use_divisor = th.nested_tensor(
-            divisor(nested_know_encoded.nested_size()))
-
-        divisor2 = th.nested_tensor(list(map(th.tensor, nested_know_encoded.size(1)))).to(
-            th.float).sqrt()
-
-        context_use_divisor = th.nested_tensor(list(map(th.tensor, nested_context_encoded.size(1)))).to(
-            th.float).mul(th.nested_tensor([th.tensor(256)] * 64)).sqrt()
-
-        import pdb
-        pdb.set_trace()
+            nested_know_encoded.nested_size(2)).to(th.float).sqrt()
 
         context_use = context_use.div(context_use_divisor)
         know_use = know_use.div(know_use_divisor)
