@@ -62,13 +62,13 @@ class ContextKnowledgeEncoder(nn.Module):
         print(nested_know_encoded.size())
         print(nested_know_encoded.nested_size(1))
 
-        # Perform Universal Sentence Encoder averaging (https://arxiv.org/abs/1803.11175).
-        # and normalization by embed_dim
-        def divisor(t):
-            if isinstance(t[0], tuple):
-                return tuple(map(divisor, t))
-            else:
-                return th.tensor(float(self.embed_dim) * float(t[0])).sqrt()
+        # # Perform Universal Sentence Encoder averaging (https://arxiv.org/abs/1803.11175).
+        # # and normalization by embed_dim
+        # def divisor(t):
+        #     if isinstance(t[0], tuple):
+        #         return tuple(map(divisor, t))
+        #     else:
+        #         return th.tensor(float(self.embed_dim) * float(t[0])).sqrt()
 
         # compute our sentence embeddings for context and knowledge
         context_use = nested_context_encoded.sum(1)
@@ -79,6 +79,7 @@ class ContextKnowledgeEncoder(nn.Module):
         # know_use_divisor = th.nested_tensor(
         #     divisor(nested_know_encoded.nested_size()))
 
+        # Implement .mul(scalar) for self.embed_dim multiplication
         context_use_divisor = th.nested_tensor(
             nested_context_encoded.nested_size(1)).to(th.float).sqrt()
         know_use_divisor = th.nested_tensor(
@@ -87,6 +88,7 @@ class ContextKnowledgeEncoder(nn.Module):
         context_use = context_use.div(context_use_divisor)
         know_use = know_use.div(know_use_divisor)
 
+        # TODO: replace with unbind
         know_use = th.nested_tensor(
             list(map(lambda x: x.to_tensor(), know_use.unbind())))
         nested_ck_attn = th.mv(know_use, context_use)
