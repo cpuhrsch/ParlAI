@@ -4,15 +4,16 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-import numpy as np
 import torch as th
 import torch.nn as nn
 import math
+import sys
 
 from parlai.core.utils import neginf
 from parlai.agents.transformer.modules import TransformerGeneratorModel
+import nestedtensor
 
-th = th.nested.monkey_patch(th)
+th = nestedtensor.nested.monkey_patch(th)
 
 
 class EndToEndModel(TransformerGeneratorModel):
@@ -43,7 +44,7 @@ class ContextKnowledgeEncoder(nn.Module):
     def forward(self, src_tokens, know_tokens, ck_mask, cs_ids, use_cs_ids):
         # encode the context, pretty basic
         context_encoded, context_mask = self.transformer(src_tokens)
-        nested_context_encoded = th.tensor_mask_to_nested_tensor(
+        nested_context_encoded = th.nested_tensor_from_tensor_mask(
             context_encoded, context_mask)
 
         N, K, Tk = know_tokens.size()
@@ -52,43 +53,26 @@ class ContextKnowledgeEncoder(nn.Module):
         know_encoded = know_encoded.reshape(N, K, Tk, -1)
         know_mask = know_mask.reshape(N, K, Tk)
 
-        know_lengths = ck_mask.sum(1)
-        # Convert into a NestedTensor TODO: move this into tensor_mask_to_nested_tensor
-        nested_know_encoded = th.nested_tensor([th.tensor_mask_to_nested_tensor(
-            know_encoded[i][:know_lengths[i]], know_mask[i][:know_lengths[i]]) for i in range(len(know_mask))])
-
-        print(know_mask)
-        print(know_encoded)
-        print(nested_know_encoded.size())
-        print(nested_know_encoded.nested_size(1))
-
-        # # Perform Universal Sentence Encoder averaging (https://arxiv.org/abs/1803.11175).
-        # # and normalization by embed_dim
-        # def divisor(t):
-        #     if isinstance(t[0], tuple):
-        #         return tuple(map(divisor, t))
-        #     else:
-        #         return th.tensor(float(self.embed_dim) * float(t[0])).sqrt()
+        nested_know_encoded = th.nested_tensor_from_tensor_mask(
+            know_encoded, know_mask)
 
         # compute our sentence embeddings for context and knowledge
         context_use = nested_context_encoded.sum(1)
         know_use = nested_know_encoded.sum(2)
 
-        # context_use_divisor = th.nested_tensor(
-        #     divisor(nested_context_encoded.nested_size()))
-        # know_use_divisor = th.nested_tensor(
-        #     divisor(nested_know_encoded.nested_size()))
-
-        # Implement .mul(scalar) for self.embed_dim multiplication
+        # Perform Universal Sentence Encoder averaging (https://arxiv.org/abs/1803.11175).
         context_use_divisor = th.nested_tensor(
-            nested_context_encoded.nested_size(1)).to(th.float).sqrt()
+            nested_context_encoded.nested_size(1)).to(th.float)
         know_use_divisor = th.nested_tensor(
-            nested_know_encoded.nested_size(2)).to(th.float).sqrt()
+            nested_know_encoded.nested_size(2)).to(th.float)
+
+        context_use_divisor.mul(self.embed_dim).sqrt()
+        know_use_divisor.mul(self.embed_dim).sqrt()
 
         context_use = context_use.div(context_use_divisor)
         know_use = know_use.div(know_use_divisor)
 
-        # TODO: replace with unbind
+        # TODO: replace with stack
         know_use = th.nested_tensor(
             list(map(lambda x: x.to_tensor(), know_use.unbind())))
         nested_ck_attn = th.mv(know_use, context_use)
@@ -110,6 +94,7 @@ class ContextKnowledgeEncoder(nn.Module):
         full_enc = th.cat([cs_encoded, context_encoded], dim=1)
         full_mask = th.cat([cs_mask, context_mask], dim=1)
 
+        sys.stdout.flush()
         # also return the knowledge selection mask for the loss
         return full_enc, full_mask, ck_attn
 
