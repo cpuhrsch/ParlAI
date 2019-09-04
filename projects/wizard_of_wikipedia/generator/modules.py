@@ -45,7 +45,7 @@ class ContextKnowledgeEncoder(nn.Module):
         # encode the context, pretty basic
         context_encoded, context_mask = self.transformer(src_tokens)
         nested_context_encoded = th.nested_tensor_from_tensor_mask(
-            context_encoded, context_mask)
+            context_encoded, context_mask, nested_dim=1)
 
         N, K, Tk = know_tokens.size()
         know_flat = know_tokens.reshape(-1, Tk)
@@ -54,7 +54,7 @@ class ContextKnowledgeEncoder(nn.Module):
         know_mask = know_mask.reshape(N, K, Tk)
 
         nested_know_encoded = th.nested_tensor_from_tensor_mask(
-            know_encoded, know_mask)
+            know_encoded, know_mask, nested_dim=2)
 
         # compute our sentence embeddings for context and knowledge
         context_use = nested_context_encoded.sum(1)
@@ -87,14 +87,14 @@ class ContextKnowledgeEncoder(nn.Module):
 
         # Convert it back to tensors + masks for compatability
         cs_encoded, cs_mask = nested_cs_encoded.to_tensor_mask()
-        context_encoded, context_mask = nested_context_encoded.to_tensor_mask()
+        context_encoded, context_mask = nested_context_encoded.to_tensor_mask(
+            mask_dim=2)
         ck_attn, ck_attn_mask = nested_ck_attn.to_tensor_mask()
 
         # finally, concatenate it all
         full_enc = th.cat([cs_encoded, context_encoded], dim=1)
         full_mask = th.cat([cs_mask, context_mask], dim=1)
 
-        sys.stdout.flush()
         # also return the knowledge selection mask for the loss
         return full_enc, full_mask, ck_attn
 
