@@ -4,10 +4,9 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import numpy as np
 import torch as th
 import torch.nn as nn
-import math
-import sys
 
 from parlai.core.utils import neginf
 from parlai.agents.transformer.modules import TransformerGeneratorModel
@@ -19,18 +18,21 @@ th = nestedtensor.nested.monkey_patch(th)
 def universal_sentence_embedding(sentences, dim, sqrt=True):
     """
     Perform Universal Sentence Encoder averaging (https://arxiv.org/abs/1803.11175).
+
      This is really just sum / sqrt(len).
+
      :param Tensor sentences: an N x T x D of Transformer outputs. Note this is
         the exact output of TransformerEncoder, but has the time axis first
     :param ByteTensor: an N x T binary matrix of paddings
-     :return: an N x D matrix of sentence embeddings
+
+    :return: an N x D matrix of sentence embeddings
     :rtype Tensor:
     """
     sentence_sums = sentences.sum(dim)
     divisor = th.nested_tensor(sentences.nested_size(dim)).to(th.float)
     if sqrt:
         divisor = divisor.sqrt()
-    sentence_sums /= divisor
+    sentence_sums = sentence_sums.div(divisor)
     return sentence_sums
 
 
@@ -78,8 +80,8 @@ class ContextKnowledgeEncoder(nn.Module):
         context_use = universal_sentence_embedding(nested_context_encoded, 1)
         know_use = universal_sentence_embedding(nested_know_encoded, 2)
 
-        context_use = context_use.div(math.sqrt(self.embed_dim))
-        know_use = know_use.div(math.sqrt(self.embed_dim))
+        context_use = context_use.div(np.sqrt(self.embed_dim))
+        know_use = know_use.div(np.sqrt(self.embed_dim))
 
         know_use = know_use.to_tensor(dim=1)
         nested_ck_attn = th.mv(know_use, context_use)
@@ -89,6 +91,7 @@ class ContextKnowledgeEncoder(nn.Module):
             # best guess
             cs_ids = nested_ck_attn.argmax(1).to_tensor()
 
+        # pick the true chosen sentence.
         # NOTE: NestedTensor doesn't support advanced indexing for now.
         nested_cs_encoded = th.nested_tensor(
             [nested_know_encoded[i][cs_ids[i]] for i in range(len(cs_ids))])
@@ -102,6 +105,7 @@ class ContextKnowledgeEncoder(nn.Module):
         # finally, concatenate it all
         full_enc = th.cat([cs_encoded, context_encoded], dim=1)
         full_mask = th.cat([cs_mask, context_mask], dim=1)
+        print(1)
 
         # also return the knowledge selection mask for the loss
         return full_enc, full_mask, ck_attn
