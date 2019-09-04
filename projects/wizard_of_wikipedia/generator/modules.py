@@ -72,9 +72,7 @@ class ContextKnowledgeEncoder(nn.Module):
         context_use = context_use.div(context_use_divisor)
         know_use = know_use.div(know_use_divisor)
 
-        # TODO: replace with stack
-        know_use = th.nested_tensor(
-            list(map(lambda x: x.to_tensor(), know_use.unbind())))
+        know_use = know_use.to_tensor(dim=1)
         nested_ck_attn = th.mv(know_use, context_use)
 
         if not use_cs_ids:
@@ -82,8 +80,9 @@ class ContextKnowledgeEncoder(nn.Module):
             # best guess
             cs_ids = nested_ck_attn.argmax(1).to_tensor()
 
-        nested_cs_encoded = th.nested_tensor([nested_know_encoded.unbind()[i].unbind()[
-            cs_ids[i]] for i in range(len(cs_ids))])
+        # NOTE: NestedTensor doesn't support advanced indexing for now.
+        nested_cs_encoded = th.nested_tensor(
+            [nested_know_encoded[i][cs_ids[i]] for i in range(len(cs_ids))])
 
         # Convert it back to tensors + masks for compatability
         cs_encoded, cs_mask = nested_cs_encoded.to_tensor_mask()
