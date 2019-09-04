@@ -16,6 +16,24 @@ import nestedtensor
 th = nestedtensor.nested.monkey_patch(th)
 
 
+def universal_sentence_embedding(sentences, dim, sqrt=True):
+    """
+    Perform Universal Sentence Encoder averaging (https://arxiv.org/abs/1803.11175).
+     This is really just sum / sqrt(len).
+     :param Tensor sentences: an N x T x D of Transformer outputs. Note this is
+        the exact output of TransformerEncoder, but has the time axis first
+    :param ByteTensor: an N x T binary matrix of paddings
+     :return: an N x D matrix of sentence embeddings
+    :rtype Tensor:
+    """
+    sentence_sums = sentences.sum(dim)
+    divisor = th.nested_tensor(sentences.nested_size(dim)).to(th.float)
+    if sqrt:
+        divisor = divisor.sqrt()
+    sentence_sums /= divisor
+    return sentence_sums
+
+
 class EndToEndModel(TransformerGeneratorModel):
     def __init__(self, opt, dictionary):
         super().__init__(opt, dictionary)
@@ -57,20 +75,11 @@ class ContextKnowledgeEncoder(nn.Module):
             know_encoded, know_mask, nested_dim=2)
 
         # compute our sentence embeddings for context and knowledge
-        context_use = nested_context_encoded.sum(1)
-        know_use = nested_know_encoded.sum(2)
+        context_use = universal_sentence_embedding(nested_context_encoded, 1)
+        know_use = universal_sentence_embedding(nested_know_encoded, 2)
 
-        # Perform Universal Sentence Encoder averaging (https://arxiv.org/abs/1803.11175).
-        context_use_divisor = th.nested_tensor(
-            nested_context_encoded.nested_size(1)).to(th.float)
-        know_use_divisor = th.nested_tensor(
-            nested_know_encoded.nested_size(2)).to(th.float)
-
-        context_use_divisor.mul(self.embed_dim).sqrt()
-        know_use_divisor.mul(self.embed_dim).sqrt()
-
-        context_use = context_use.div(context_use_divisor)
-        know_use = know_use.div(know_use_divisor)
+        context_use = context_use.div(math.sqrt(self.embed_dim))
+        know_use = know_use.div(math.sqrt(self.embed_dim))
 
         know_use = know_use.to_tensor(dim=1)
         nested_ck_attn = th.mv(know_use, context_use)
