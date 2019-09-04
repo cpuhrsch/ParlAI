@@ -19,9 +19,9 @@ def universal_sentence_embedding(sentences, dim, sqrt=True):
     """
     Perform Universal Sentence Encoder averaging (https://arxiv.org/abs/1803.11175).
 
-     This is really just sum / sqrt(len).
+    This is really just sum / sqrt(len).
 
-     :param Tensor sentences: an N x T x D of Transformer outputs. Note this is
+    :param Tensor sentences: an N x T x D of Transformer outputs. Note this is
         the exact output of TransformerEncoder, but has the time axis first
     :param ByteTensor: an N x T binary matrix of paddings
 
@@ -97,7 +97,7 @@ class ContextKnowledgeEncoder(nn.Module):
             [nested_know_encoded[i][cs_ids[i]] for i in range(len(cs_ids))])
 
         # Convert it back to tensors + masks for compatability
-        cs_encoded, cs_mask = nested_cs_encoded.to_tensor_mask()
+        cs_encoded, cs_mask = nested_cs_encoded.to_tensor_mask(mask_dim=2)
         context_encoded, context_mask = nested_context_encoded.to_tensor_mask(
             mask_dim=2)
         ck_attn, ck_attn_mask = nested_ck_attn.to_tensor_mask()
@@ -105,7 +105,6 @@ class ContextKnowledgeEncoder(nn.Module):
         # finally, concatenate it all
         full_enc = th.cat([cs_encoded, context_encoded], dim=1)
         full_mask = th.cat([cs_mask, context_mask], dim=1)
-        print(1)
 
         # also return the knowledge selection mask for the loss
         return full_enc, full_mask, ck_attn
